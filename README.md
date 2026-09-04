@@ -42,16 +42,24 @@ The repository deploys to Vercel as-is: `public/` is served as static files and
 Two one-time settings in the Vercel project make it a real home for your data:
 
 1. **Storage → Create Database → Blob**, connected to the project. This sets
-   `BLOB_READ_WRITE_TOKEN` and the portal keeps its data in one *private* blob
-   (`familyos/db.json`). Without it the app still works but data lives in the
-   function's `/tmp` and disappears between instances — the page shows a
-   yellow notice until this is done.
+   `BLOB_READ_WRITE_TOKEN` and the portal keeps its data in one blob at an
+   unguessable path derived from the token. Pick **Private** access when the
+   store is created if the option is offered; a public store works too.
+   Without a store the app still runs, but data lives in the function's
+   `/tmp` and disappears between instances — the page shows a yellow notice
+   until this is done.
 2. **Settings → Environment Variables → `PORTAL_PASSWORD`**. Until it is set,
    anyone with the URL can open the portal; the page says so at the top.
 
-Redeploy after changing either. Locally nothing changes: `node server.js`
-still uses `data/db.json` and needs no packages. `@vercel/blob` is only
-imported when a token is present.
+Redeploy after changing either.
+
+If something is off, open `/api/health` on the deployment. It reports the
+active storage backend, whether it can be read, the Node version and which
+variables are present (never their values). Errors from the function come
+back as JSON with the real message instead of a blank crash page.
+
+Locally nothing changes: `node server.js` still uses `data/db.json` and needs
+no packages. `@vercel/blob` is only imported when a token is present.
 
 ## What is inside
 

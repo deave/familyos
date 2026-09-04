@@ -842,5 +842,6 @@ setInterval(() => {
 }, 20000);
 
 reload().catch((err) => {
-  app.innerHTML = `<p class="center error">Could not load the portal: ${esc(err.message)}</p>`;
+  app.innerHTML = `<p class="center error">Could not load the portal: ${esc(err.message)}</p>
+    <p class="center muted small">Open <a href="/api/health">/api/health</a> to see what the server can and cannot reach.</p>`;
 });

@@ -87,6 +87,32 @@ function serveStatic(req, res, urlPath) {
   fs.createReadStream(file).pipe(res);
 }
 
+// What the browser (or you, in a tab) can use to see why a deployment is
+// unhappy: which backend is active, whether it can be read, and which
+// environment variables are present. Never includes secret values.
+async function health(store, deployment) {
+  const storage = { ok: false, error: null, ...store.describe() };
+  try {
+    const s = await store.refresh();
+    storage.ok = Boolean(s && s.members);
+    storage.members = s ? Object.keys(s.members) : [];
+  } catch (err) {
+    storage.error = err.message;
+  }
+  return {
+    ok: storage.ok,
+    node: process.version,
+    deployment,
+    storage,
+    env: {
+      vercel: Boolean(process.env.VERCEL),
+      region: process.env.VERCEL_REGION || null,
+      hasBlobToken: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+      hasPassword: Boolean(process.env.PORTAL_PASSWORD),
+    },
+  };
+}
+
 // Picks the storage backend from the environment:
 //   BLOB_READ_WRITE_TOKEN set  -> private Vercel Blob (durable on serverless)
 //   explicit dataFile          -> that file
@@ -119,6 +145,8 @@ export function createHandler({ dataFile, password, blobToken } = {}) {
       });
     }
 
+    if (pathname === '/api/health') return send(res, 200, await health(store, deployment));
+
     if (pathname.startsWith('/api/')) {
       try {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : null;
@@ -128,7 +156,8 @@ export function createHandler({ dataFile, password, blobToken } = {}) {
       } catch (err) {
         const status = err.status || 500;
         if (status === 500) console.error(err);
-        return send(res, status, { error: status === 500 ? 'something went wrong' : err.message });
+        const message = status === 500 ? `Server error: ${err.message || 'something went wrong'}` : err.message;
+        return send(res, status, { error: message });
       }
     }
 
