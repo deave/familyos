@@ -170,6 +170,26 @@ export function createApp(opts = {}) {
   return http.createServer(createHandler(opts));
 }
 
+// Hosts that load this file as a function entry point (Vercel treats a
+// package.json "main" as the app when it sees one) call this default export.
+// It is lazy and never throws: a failure anywhere comes back as JSON with the
+// real message instead of an opaque platform crash page.
+let lazy = null;
+export default async function entry(req, res) {
+  try {
+    if (!lazy) lazy = createHandler({ dataFile: process.env.DATA_FILE, password: process.env.PORTAL_PASSWORD });
+    await lazy(req, res);
+  } catch (err) {
+    lazy = null;
+    console.error(err);
+    if (!res.headersSent) {
+      send(res, 500, { error: `Server error: ${err.message}`, stack: String(err.stack || '').split('\n').slice(0, 4) });
+    } else {
+      res.end();
+    }
+  }
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const port = Number(process.env.PORT) || 3000;

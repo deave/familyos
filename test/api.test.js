@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.js';
@@ -179,4 +180,19 @@ test('optional shared password protects everything', async () => {
   });
   assert.equal(allowed.status, 200);
   await new Promise((r) => locked.close(r));
+});
+
+test('server.js default export serves the app as a single function entry', async () => {
+  process.env.DATA_FILE = path.join(dir, 'entry.json');
+  const { default: entry } = await import('../server.js');
+  const srv = http.createServer((req, res) => { entry(req, res); });
+  await new Promise((r) => srv.listen(0, r));
+  const url = `http://localhost:${srv.address().port}`;
+  const home = await fetch(url + '/');
+  assert.equal(home.status, 200);
+  assert.match(await home.text(), /FamilyOS/);
+  const state = await fetch(url + '/api/state');
+  assert.equal(state.status, 200);
+  assert.ok((await state.json()).members.david);
+  srv.close();
 });
