@@ -1,8 +1,9 @@
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Store } from './src/store.js';
+import { FileStore, BlobStore } from './src/store.js';
 import { buildRoutes } from './src/api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,9 +33,20 @@ function send(res, status, body, headers = {}) {
 }
 
 function readBody(req, limit = 64 * 1024) {
+  // Some hosts (Vercel) parse JSON bodies before the handler runs.
+  if (req.body !== undefined && typeof req.body !== 'string') return Promise.resolve(req.body ?? {});
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    const finish = (raw) => {
+      if (!raw.length) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(Object.assign(new Error('body must be JSON'), { status: 400 }));
+      }
+    };
+    if (typeof req.body === 'string') return finish(req.body);
     req.on('data', (c) => {
       size += c.length;
       if (size > limit) {
@@ -44,14 +56,7 @@ function readBody(req, limit = 64 * 1024) {
       }
       chunks.push(c);
     });
-    req.on('end', () => {
-      if (!chunks.length) return resolve({});
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      } catch {
-        reject(Object.assign(new Error('body must be JSON'), { status: 400 }));
-      }
-    });
+    req.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }
@@ -82,13 +87,31 @@ function serveStatic(req, res, urlPath) {
   fs.createReadStream(file).pipe(res);
 }
 
-export function createApp({ dataFile, password } = {}) {
-  const store = new Store(dataFile || path.join(__dirname, 'data', 'db.json'));
-  store.load();
-  const api = buildRoutes(store);
+// Picks the storage backend from the environment:
+//   BLOB_READ_WRITE_TOKEN set  -> private Vercel Blob (durable on serverless)
+//   explicit dataFile          -> that file
+//   running on Vercel          -> /tmp (works, but is wiped between instances)
+//   otherwise                  -> data/db.json next to this file
+export function createStore({ dataFile, blobToken = process.env.BLOB_READ_WRITE_TOKEN } = {}) {
+  if (blobToken) return { store: new BlobStore({ token: blobToken }), ephemeral: false, backend: 'blob' };
+  if (dataFile) return { store: new FileStore(dataFile), ephemeral: false, backend: 'file' };
+  if (process.env.VERCEL) {
+    return { store: new FileStore(path.join(os.tmpdir(), 'familyos-db.json')), ephemeral: true, backend: 'tmp' };
+  }
+  return { store: new FileStore(path.join(__dirname, 'data', 'db.json')), ephemeral: false, backend: 'file' };
+}
 
-  return http.createServer(async (req, res) => {
+// A plain (req, res) handler, usable by node:http and by serverless hosts.
+export function createHandler({ dataFile, password, blobToken } = {}) {
+  const { store, ephemeral, backend } = createStore({ dataFile, blobToken });
+  const onVercel = Boolean(process.env.VERCEL);
+  const deployment = { ephemeral, backend, unprotected: onVercel && !password, hosted: onVercel };
+  const api = buildRoutes(store, deployment);
+
+  return async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
+    // Hosts that rewrite /api/* to this function pass the original path along.
+    const pathname = url.searchParams.get('__path') || url.pathname;
 
     if (!authorized(req, password)) {
       return send(res, 401, 'Sign in to the family portal', {
@@ -96,10 +119,10 @@ export function createApp({ dataFile, password } = {}) {
       });
     }
 
-    if (url.pathname.startsWith('/api/')) {
+    if (pathname.startsWith('/api/')) {
       try {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : null;
-        const out = api.dispatch(req.method, url.pathname, body);
+        const out = await api.dispatch(req.method, pathname, body);
         if (!out) return send(res, 404, { error: 'not found' });
         return send(res, out.status, out.body);
       } catch (err) {
@@ -110,8 +133,12 @@ export function createApp({ dataFile, password } = {}) {
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
-    return serveStatic(req, res, url.pathname);
-  });
+    return serveStatic(req, res, pathname);
+  };
+}
+
+export function createApp(opts = {}) {
+  return http.createServer(createHandler(opts));
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

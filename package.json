@@ -10,7 +10,10 @@
     "test": "node --test test/*.test.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
   },
   "license": "UNLICENSED",
   "private": true

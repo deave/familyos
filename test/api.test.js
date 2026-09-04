@@ -160,6 +160,14 @@ test('state survives a restart', async () => {
   assert.equal(body.work.headline, 'Persisted headline');
 });
 
+test('rewritten requests use the original path from __path', async () => {
+  const res = await fetch(base + '/api/index?__path=/api/state');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.members.david);
+  assert.equal(body.deployment.ephemeral, false);
+});
+
 test('optional shared password protects everything', async () => {
   const locked = createApp({ dataFile: path.join(dir, 'locked.json'), password: 'secret' });
   await new Promise((r) => locked.listen(0, '127.0.0.1', r));

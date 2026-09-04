@@ -72,7 +72,7 @@ const isoDate = (v) => {
 
 // Each route: [method, pattern, handler(state, params, body) => result]
 // Handlers that mutate must return through store.update, which the server wraps.
-export function buildRoutes(store) {
+export function buildRoutes(store, deployment = {}) {
   const routes = [];
   const on = (method, pattern, handler, { mutates = true } = {}) => {
     const keys = [];
@@ -82,7 +82,7 @@ export function buildRoutes(store) {
     routes.push({ method, re, keys, handler, mutates });
   };
 
-  on('GET', '/api/state', (s) => ({ ...s, options: AVATAR_OPTIONS, messageKinds: MESSAGE_KINDS }), {
+  on('GET', '/api/state', (s) => ({ ...s, options: AVATAR_OPTIONS, messageKinds: MESSAGE_KINDS, deployment }), {
     mutates: false,
   });
 
@@ -269,8 +269,8 @@ export function buildRoutes(store) {
   });
 
   return {
-    // Returns {status, body} or null when no route matches.
-    dispatch(method, pathname, body) {
+    // Resolves to {status, body}, or null when no route matches.
+    async dispatch(method, pathname, body) {
       for (const r of routes) {
         if (r.method !== method) continue;
         const m = r.re.exec(pathname);
@@ -278,8 +278,8 @@ export function buildRoutes(store) {
         const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
         try {
           const result = r.mutates
-            ? store.update((s) => r.handler(s, params, body ?? {}))
-            : r.handler(store.state, params, body ?? {});
+            ? await store.update((s) => r.handler(s, params, body ?? {}))
+            : r.handler(await store.refresh(), params, body ?? {});
           return { status: 200, body: result };
         } catch (err) {
           if (err instanceof ApiError) return { status: err.status, body: { error: err.message } };

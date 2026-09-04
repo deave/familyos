@@ -171,10 +171,21 @@ function render() {
         ${av(self(), 32)}<span class="who-name">${esc(self().name)}</span><span class="who-caret">⇄</span>
       </button>
     </header>
+    ${deploymentNotice()}
     <main class="view view-${route}">${view()}</main>
   `;
   document.title = unread ? `(${unread}) FamilyOS` : 'FamilyOS';
   afterRender();
+}
+
+// Shown only on a hosted deployment that still needs its one-time setup.
+function deploymentNotice() {
+  const d = state.deployment || {};
+  const items = [];
+  if (d.unprotected) items.push('<strong>Anyone with the link can open this.</strong> Set a <code>PORTAL_PASSWORD</code> environment variable on the host and redeploy before entering real numbers.');
+  if (d.ephemeral) items.push('<strong>Nothing is saved yet.</strong> Connect a Vercel Blob store to the project (Storage → Create → Blob, then redeploy) and everything will persist.');
+  if (!items.length) return '';
+  return `<aside class="setup-notice" role="note">${items.map((i) => `<p>${i}</p>`).join('')}</aside>`;
 }
 
 function afterRender() {
